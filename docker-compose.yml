@@ -1,0 +1,298 @@
+services:
+  # Infrastructure services
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: smartvision-platform-nginx
+    ports: ["8081:80"]
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - smartvision-net
+    depends_on:
+      - api-gateway
+    healthcheck:
+      test: ["CMD-SHELL", "nginx", "-t"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  haproxy:
+    image: haproxy:2.8-alpine
+    container_name: smartvision-platform-haproxy
+    ports: ["8087:80", "1936:1936"]
+    volumes:
+      - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    networks:
+      - smartvision-net
+    depends_on:
+      - api-gateway
+
+  redis:
+    image: redis:7.2-alpine
+    container_name: smartvision-platform-redis
+    ports: ["6379:6379"]
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  zipkin:
+    image: openzipkin/zipkin:2.26
+    container_name: smartvision-platform-zipkin
+    ports: ["9411:9411"]
+    environment:
+      - STORAGE_TYPE=mem
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0.6
+    container_name: smartvision-platform-keycloak
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin123
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME_STRICT: "false"
+    volumes:
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+    networks:
+      - smartvision-net
+    ports: ["8086:8080"]
+ 
+  mongodb:
+    image: mongo:4.4
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: smartvideo
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - smartvision-net
+    healthcheck:
+      test: ["CMD-SHELL", "mongo", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  
+  # Monitoring stack
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: smartvision-platform-prometheus
+    ports: ["9090:9090"]
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - smartvision-net
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+    healthcheck:
+      test: ["CMD-SHELL", "curl", "-f", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: smartvision-platform-grafana
+    ports: ["3000:3000"]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources
+      - grafana_data:/var/lib/grafana
+    networks:
+      - smartvision-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      
+  config-server:
+    build: ./config-server
+    container_name: smartvision-platform-config-server
+    ports:
+      - "8888:8888"
+    healthcheck:
+      test: ["CMD-SHELL", "curl", "-f", "http://localhost:8888/actuator/health | grep -q '\"status\":\"UP\"' && exit 0 || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+    networks:
+      - smartvision-net
+    volumes:
+      - /home/ahdiallo/smartvision-config-repo-dev:/home/ahdiallo/smartvision-config-repo-dev
+    environment:
+      - HOME=/home/ahdiallo
+      - CONFIG_REPO_BRANCH=${CONFIG_REPO_BRANCH:-main}
+      - CONFIG_URI=${CONFIG_URI:-http://config-server:8888}
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-docker}
+
+  eureka-server:
+    build: ./eureka-server
+    hostname: eureka-server
+    container_name: smartvision-platform-eureka-server
+    ports:
+      - "8761:8761"
+    healthcheck:
+      test: ["CMD-SHELL", "curl", "-f", "http://localhost:8761/actuator/health | grep -q '\"status\":\"UP\"' && exit 0 || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - /home/ahdiallo/smartvision-config-repo-dev:/home/ahdiallo/smartvision-config-repo-dev
+    networks:
+      - smartvision-net
+    environment:
+      - HOME=/home/ahdiallo
+      - EUREKA_DEFAULTZONE=${EUREKA_DEFAULTZONE:-http://eureka-server:8761/eureka/}
+      - CONFIG_URI=${CONFIG_URI:-http://config-server:8888}
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-docker}
+      # - SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI=${ISSUER_URI:-http://keycloak:8080/realms/smartvision}
+    depends_on:
+      config-server:
+        condition: service_started
+      redis:
+        condition: service_healthy
+
+
+  api-gateway:
+    build: ./api-gateway
+    container_name: smartvision-platform-api-gateway
+    ports:
+      - "8084:8084"
+    healthcheck:
+      test: ["CMD-SHELL", "curl", "-f", "http://localhost:8084/actuator/health | grep -q '\"status\":\"UP\"' && exit 0 || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+    networks:
+      - smartvision-net  
+    volumes:
+      - /home/ahdiallo/smartvision-config-repo-dev:/home/ahdiallo/smartvision-config-repo-dev
+    environment:
+      - HOME=/home/ahdiallo
+      - EUREKA_DEFAULTZONE=${EUREKA_DEFAULTZONE:-http://eureka-server:8761/eureka/}
+      - CONFIG_URI=${CONFIG_URI:-http://config-server:8888}
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-docker}
+      - SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI=${ISSUER_URI:-http://keycloak:8080/realms/smartvision}
+    depends_on:
+      config-server:
+        condition: service_started
+      eureka-server:
+        condition: service_started
+      keycloak:
+        condition: service_started
+      zipkin:
+        condition: service_started
+
+  video-core:
+    build: ./video-core
+    container_name: smartvision-platform-video-core
+    ports:
+      - "8085:8085"
+    healthcheck:
+      test: ["CMD-SHELL", "curl", "-f", "http://localhost:8085/actuator/health | grep -q '\"status\":\"UP\"' && exit 0 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - smartvision-net
+    volumes:
+      - /home/ahdiallo/smartvision-config-repo-dev:/home/ahdiallo/smartvision-config-repo-dev
+    environment:
+      - HOME=/home/ahdiallo
+      - EUREKA_DEFAULTZONE=${EUREKA_DEFAULTZONE:-http://eureka-server:8761/eureka/}
+      - CONFIG_URI=${CONFIG_URI:-http://config-server:8888}
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-docker}
+      - SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI=${ISSUER_URI:-http://keycloak:8080/realms/smartvision}
+    depends_on:
+      config-server:
+        condition: service_started
+      eureka-server:
+        condition: service_started
+      keycloak:
+        condition: service_started
+      zipkin:
+        condition: service_started
+
+  video-analyzer:
+    build: ./video-analyzer
+    container_name: smartvision-platform-video-analyzer
+    ports:
+      - "8082:8082"
+    healthcheck:
+      test: ["CMD-SHELL", "curl", "-f", "http://localhost:8082/actuator/health | grep -q '\"status\":\"UP\"' && exit 0 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - smartvision-net
+    volumes:
+      - /home/ahdiallo/smartvision-config-repo-dev:/home/ahdiallo/smartvision-config-repo-dev
+    environment:
+      - HOME=/home/ahdiallo
+      - EUREKA_DEFAULTZONE=${EUREKA_DEFAULTZONE:-http://eureka-server:8761/eureka/}
+      - CONFIG_URI=${CONFIG_URI:-http://config-server:8888}
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-docker}
+      - SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI=${ISSUER_URI:-http://keycloak:8080/realms/smartvision}
+    depends_on:
+      config-server:
+        condition: service_started
+      eureka-server:
+        condition: service_started
+      keycloak:
+        condition: service_started
+      zipkin:
+        condition: service_started
+  video-storage:
+    build: ./video-storage
+    container_name: smartvision-platform-video-storage
+    ports:
+      - "8083:8083"
+    healthcheck:
+      test: ["CMD-SHELL", "curl", "-f", "http://localhost:8083/actuator/health | grep -q '\"status\":\"UP\"' && exit 0 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - smartvision-net
+    volumes:
+      - /home/ahdiallo/smartvision-config-repo-dev:/home/ahdiallo/smartvision-config-repo-dev
+    environment:
+      - HOME=/home/ahdiallo
+      - EUREKA_DEFAULTZONE=${EUREKA_DEFAULTZONE:-http://eureka-server:8761/eureka/}
+      - CONFIG_URI=${CONFIG_URI:-http://config-server:8888}
+      - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-docker}
+      - SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI=${ISSUER_URI:-http://keycloak:8080/realms/smartvision}
+    depends_on:
+      config-server:
+        condition: service_started
+      eureka-server:
+        condition: service_started
+      mongodb:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+      zipkin:
+        condition: service_started
+volumes:
+  mongo_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+networks:
+  smartvision-net:
+    driver: bridge

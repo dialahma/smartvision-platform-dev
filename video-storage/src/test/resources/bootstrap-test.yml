@@ -1,0 +1,13 @@
+spring:
+  cloud:
+    config:
+      enabled: false
+  data:
+    mongodb:
+      # rien à définir, Boot détecte l’embedded
+      spring.mongodb.embedded.version: 4.0.2
+
+eureka:
+  client:
+    enabled: false
+

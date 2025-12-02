@@ -1,0 +1,7 @@
+spring:
+  application:
+    name: video-analyzer
+  cloud:
+    config:
+      uri: ${CONFIG_URI:http://localhost:8888}
+      fail-fast: true

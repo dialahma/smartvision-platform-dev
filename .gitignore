@@ -1,0 +1,30 @@
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.classpath
+.project
+.settings/
+bin/
+build/
+target/
+
+# Docker
+docker-compose.override.yml
+
+# Logs
+*.log
+logs/
+
+# Autres
+*.swp
+*.swo
+.DS_Store
+.env
+*.bak
+*.tmp
+
+# Configuration locale
+/config-repo/

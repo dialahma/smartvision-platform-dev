@@ -1,0 +1,27 @@
+server:
+  port: 8888
+spring:
+  application:
+    name: config-server
+  cloud:
+    config:
+      server:
+        git:
+          uri: file:/home/ahdiallo/smartvision-config-repo-dev
+          clone-on-start: true
+          force-pull: true
+          default-label: ${CONFIG_REPO_BRANCH:main}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,env,configprops,beans,prometheus
+  endpoint:
+    env:
+      enabled: true
+      
+logging:
+  level:
+    org.springframework.cloud: DEBUG
+    com.netflix: DEBUG
