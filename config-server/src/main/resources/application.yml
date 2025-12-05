@@ -7,7 +7,9 @@ spring:
     config:
       server:
         git:
-          uri: file:/home/ahdiallo/smartvision-config-repo-dev
+          uri: https://github.com/dialahma/smartvision-config-repo-dev.git
+          username: ${CONFIG_REPO_GIT_USERNAME}
+          password: ${CONFIG_REPO_GIT_PASSWORD}
           clone-on-start: true
           force-pull: true
           default-label: ${CONFIG_REPO_BRANCH:main}

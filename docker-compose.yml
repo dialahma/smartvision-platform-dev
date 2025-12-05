@@ -137,7 +137,8 @@ services:
       - CONFIG_REPO_BRANCH=${CONFIG_REPO_BRANCH:-main}
       - CONFIG_URI=${CONFIG_URI:-http://config-server:8888}
       - SPRING_PROFILES_ACTIVE=${SPRING_PROFILES_ACTIVE:-docker}
-
+      - CONFIG_REPO_GIT_PASSWORD=${CONFIG_REPO_GIT_PASSWORD:-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}
+      - ${CONFIG_REPO_GIT_USERNAME=CONFIG_REPO_GIT_USERNAME:-dialahma}
   eureka-server:
     build: ./eureka-server
     hostname: eureka-server
