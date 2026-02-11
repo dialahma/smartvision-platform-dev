@@ -20,4 +20,3 @@ public class GatewayInfoController {
     public Mono<String> internalHealth() { return Mono.just("OK"); }
 
 }
-
